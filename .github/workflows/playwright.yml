@@ -42,10 +42,15 @@ jobs:
           playwright-report/
         retention-days: 7
 
-    - name: 📸 Upload screenshots on failure
+    - name: 📸 Upload failure artifacts
       uses: actions/upload-artifact@v4
       if: failure()
       with:
-        name: screenshots-${{ github.run_id }}
-        path: test-results/**/*.png
-        retention-days: 3
+        name: failure-artifacts-${{ github.run_id }}
+        path: |
+          test-results/**/*.png
+          test-results/**/*.webm
+          test-results/**/*.zip
+          test-results/**/*.log
+          test-results/**/trace.zip
+        retention-days: 7
