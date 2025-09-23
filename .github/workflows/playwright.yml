@@ -1,0 +1,276 @@
+name: �� Playwright Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Test Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+      test_type:
+        description: 'Test Type'
+        required: true
+        default: 'smoke'
+        type: choice
+        options:
+          - smoke
+          - regression
+          - all
+      browser:
+        description: 'Browser'
+        required: true
+        default: 'chromium'
+        type: choice
+        options:
+          - chromium
+          - firefox
+          - webkit
+          - all
+
+jobs:
+  test:
+    name: 🧪 Run Tests
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test-group: [
+          "tests/01-user-registration.spec.ts",
+          "tests/02-password-reset.spec.ts", 
+          "tests/03-product-search.spec.ts",
+          "tests/04-product-category.spec.ts"
+        ]
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: 📦 Install dependencies
+      run: npm ci
+
+    - name: 🎭 Install Playwright Browsers
+      run: npx playwright install chromium --with-deps
+
+    - name: 🔧 Type check
+      run: npm run type-check
+
+    - name: 🧪 Run Playwright tests
+      env:
+        test_env: ${{ github.event.inputs.environment || 'dev' }}
+        CI: true
+      run: |
+        if [ "${{ github.event.inputs.test_type }}" = "smoke" ] || [ "${{ github.event_name }}" = "pull_request" ]; then
+          npm test -- ${{ matrix.test-group }} --grep "@smoke" --workers=1
+        elif [ "${{ github.event.inputs.test_type }}" = "regression" ]; then
+          npm test -- ${{ matrix.test-group }} --grep "@regression" --workers=1
+        else
+          npm test -- ${{ matrix.test-group }} --workers=1
+        fi
+
+    - name: 📊 Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-${{ matrix.test-group }}-${{ github.run_id }}
+        path: |
+          test-results/
+          playwright-report/
+          ctrf/
+        retention-days: 30
+
+    - name: 📸 Upload screenshots
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: screenshots-${{ matrix.test-group }}-${{ github.run_id }}
+        path: test-results/**/*.png
+        retention-days: 7
+
+    - name: 🎬 Upload videos
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: videos-${{ matrix.test-group }}-${{ github.run_id }}
+        path: test-results/**/*.webm
+        retention-days: 7
+
+  report:
+    name: 📊 Generate Reports
+    needs: test
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: 📦 Install dependencies
+      run: npm ci
+
+    - name: 📥 Download all test results
+      uses: actions/download-artifact@v4
+      with:
+        pattern: test-results-*
+        path: test-results-combined/
+        merge-multiple: true
+
+    - name: 🔄 Merge test results
+      run: |
+        mkdir -p merged-results
+        find test-results-combined -name "*.json" -exec cp {} merged-results/ \;
+        find test-results-combined -name "*.xml" -exec cp {} merged-results/ \;
+
+    - name: 📊 Generate consolidated HTML report
+      run: |
+        # If HTML reports exist, copy them
+        if [ -d "test-results-combined/playwright-report" ]; then
+          cp -r test-results-combined/playwright-report/* playwright-report/ 2>/dev/null || true
+        fi
+        # Generate new report if needed
+        npx playwright merge-reports --reporter=html test-results-combined/ || true
+
+    - name: 📈 Publish HTML Report
+      uses: peaceiris/actions-gh-pages@v3
+      if: always()
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./playwright-report
+        destination_dir: reports/${{ github.run_number }}
+
+    - name: 💬 Comment PR with results
+      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request'
+      with:
+        script: |
+          const fs = require('fs');
+          let reportUrl = `https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/reports/${{ github.run_number }}`;
+          
+          let comment = `## 🎭 Test Results\n\n`;
+          comment += `📊 **HTML Report**: [View Report](${reportUrl})\n`;
+          comment += `🔍 **Test Run**: [${context.runNumber}](${context.payload.repository.html_url}/actions/runs/${context.runId})\n\n`;
+          
+          // Add test summary if available
+          try {
+            const results = fs.readFileSync('merged-results/results.json', 'utf8');
+            const data = JSON.parse(results);
+            comment += `### Summary\n`;
+            comment += `- ✅ Passed: ${data.stats?.passed || 0}\n`;
+            comment += `- ❌ Failed: ${data.stats?.failed || 0}\n`;
+            comment += `- ⏭️ Skipped: ${data.stats?.skipped || 0}\n`;
+          } catch (e) {
+            comment += `### Status\n`;
+            comment += `Tests completed. Check the full report for details.\n`;
+          }
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+  performance:
+    name: ⚡ Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event.inputs.test_type == 'all'
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: 📦 Install dependencies
+      run: npm ci
+
+    - name: 🎭 Install Playwright Browsers
+      run: npx playwright install chromium --with-deps
+
+    - name: ⚡ Run performance tests
+      run: |
+        # Run tests with performance tracing
+        npm test -- --trace=on --workers=1
+        
+    - name: 📊 Upload performance artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: performance-traces-${{ github.run_id }}
+        path: test-results/**/*.zip
+        retention-days: 7
+
+  security:
+    name: 🔒 Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: 📦 Install dependencies
+      run: npm ci
+
+    - name: 🔍 Run npm audit
+      run: npm audit --audit-level moderate
+
+    - name: 🔒 CodeQL Analysis
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript
+
+    - name: 🔒 Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+
+  notify:
+    name: 📢 Notifications
+    needs: [test, report]
+    runs-on: ubuntu-latest
+    if: always() && (github.event_name == 'schedule' || failure())
+    
+    steps:
+    - name: 📧 Notify on failure
+      if: failure()
+      run: |
+        echo "Tests failed! Check the results at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        # Add your notification logic here (Slack, Teams, Email, etc.)
+        
+    - name: ✅ Notify on success (scheduled only)
+      if: success() && github.event_name == 'schedule'
+      run: |
+        echo "Scheduled tests passed successfully!"
+        # Add your notification logic here
