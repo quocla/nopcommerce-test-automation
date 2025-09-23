@@ -60,10 +60,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/nopcommerce-test-automation.git"
+    "url": "https://github.com/quocla/nopcommerce-test-automation.git"
   },
   "bugs": {
-    "url": "https://github.com/your-username/nopcommerce-test-automation/issues"
+    "url": "https://github.com/quocla/nopcommerce-test-automation/issues"
   },
-  "homepage": "https://github.com/your-username/nopcommerce-test-automation#readme"
+  "homepage": "https://github.com/quocla/nopcommerce-test-automation#readme"
 }
