@@ -24,7 +24,7 @@ export class ForgotPasswordPage extends BasePage {
 
     // Messages - use text-based locator for success message
     this.successMessage = page.getByText('Email with instructions has been sent to you.');
-    this.errorMessage = page.locator('.message-error');
+    this.errorMessage = page.getByText('Email not found.');
     this.validationError = page.locator('.field-validation-error');
 
     // Page elements

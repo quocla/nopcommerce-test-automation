@@ -38,7 +38,7 @@ export class RegisterPage extends BasePage {
     this.registerButton = page.locator('#register-button');
 
     // Messages and validation - field validation errors appear inline after fields
-    this.successMessage = page.locator('.result');
+    this.successMessage = page.getByText('Your registration completed');
     this.fieldValidationErrors = page.locator('.field-validation-error, [data-valmsg-for]');
 
     // Page elements
